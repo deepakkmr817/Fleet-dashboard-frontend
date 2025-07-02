@@ -1,15 +1,13 @@
 {
   "name": "fleet-dashboard",
   "version": "1.0.0",
-  "private": true,
   "dependencies": {
-    "leaflet": "^1.9.4",
-    "papaparse": "^5.4.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "xlsx": "^0.18.5"
+    "react-scripts": "5.0.1",
+    "leaflet": "^1.9.4",
     "react-leaflet": "^4.2.1",
-    "react-scripts": "5.0.1"
+    "xlsx": "^0.18.5"
   },
   "scripts": {
     "start": "react-scripts start",
