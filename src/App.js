@@ -1,16 +1,21 @@
 import React, { useEffect, useState, useRef } from "react";
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
-import Papa from "papaparse";
 import "leaflet/dist/leaflet.css";
+import * as XLSX from "xlsx";
 import L from "leaflet";
 
+// Fix Leaflet default icon issue using CDN fallback URLs
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: "https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon-2x.png",
   iconUrl: "https://unpkg.com/leaflet@1.7.1/dist/images/marker-icon.png",
   shadowUrl: "https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png",
 });
 
-const YardLocation = { lat: -33.870, lng: 151.200, radius: 0.5 };
+const YardLocation = {
+  lat: -33.870,
+  lng: 151.200,
+  radius: 0.5,
+};
 
 const isInYard = (lat, lng) => {
   const R = 6371;
@@ -26,9 +31,9 @@ const isInYard = (lat, lng) => {
   return distance <= YardLocation.radius;
 };
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "http://localhost:3001";
+const BACKEND_URL = "https://your-backend-url.com"; // Replace with your backend deployment URL
 
-function App() {
+export default function FleetDashboard() {
   const [trailers, setTrailers] = useState([]);
   const [gpsData, setGpsData] = useState([]);
   const previousStatuses = useRef({});
@@ -37,48 +42,61 @@ function App() {
     const file = e.target.files[0];
     if (!file) return;
 
-    Papa.parse(file, {
-      header: true,
-      complete: (results) => {
-        const enriched = results.data
-          .map((row, index) => {
-            const lat = parseFloat(row.lat);
-            const lng = parseFloat(row.lng);
-            return {
-              id: row.id || `TRAILER-${index}`,
-              lastService: row.lastService || "Unknown",
-              location: { lat, lng },
-              status: isInYard(lat, lng) ? "In Yard" : "Out for Job",
-            };
-          })
-          .filter(Boolean);
-        setTrailers(enriched);
-      },
-    });
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const data = new Uint8Array(event.target.result);
+      const workbook = XLSX.read(data, { type: "array" });
+      const sheetName = workbook.SheetNames[0];
+      const worksheet = workbook.Sheets[sheetName];
+      const jsonData = XLSX.utils.sheet_to_json(worksheet);
+
+      const enriched = jsonData
+        .map((row, index) => {
+          const lat = parseFloat(row.lat);
+          const lng = parseFloat(row.lng);
+          return {
+            id: row.id || `TRAILER-${index}`,
+            lastService: row.lastService || "Unknown",
+            location: { lat, lng },
+            status: isInYard(lat, lng) ? "In Yard" : "Out for Job",
+          };
+        })
+        .filter(Boolean);
+
+      setTrailers(enriched);
+    };
+    reader.readAsArrayBuffer(file);
   };
 
   const fetchWebfleetData = async () => {
     try {
-      const res = await fetch(`${BACKEND_URL}/api/gps-data`);
-      const data = await res.json();
-      if (Array.isArray(data.report)) {
+      const response = await fetch(`${BACKEND_URL}/api/gps-data`);
+      const data = await response.json();
+
+      if (data.report && Array.isArray(data.report)) {
         const liveData = data.report.map((item, index) => {
           const lat = parseFloat(item.objectlatitude) / 100000;
           const lng = parseFloat(item.objectlongitude) / 100000;
           const id = item.vehicleexternalid || `GPS-${index}`;
           const currentStatus = isInYard(lat, lng) ? "In Yard" : "Out for Job";
 
-          if (previousStatuses.current[id] === "Out for Job" && currentStatus === "In Yard") {
+          const prev = previousStatuses.current[id];
+          if (prev === "Out for Job" && currentStatus === "In Yard") {
             sendAlert(id);
           }
+
           previousStatuses.current[id] = currentStatus;
 
-          return { id, location: { lat, lng }, status: currentStatus };
+          return {
+            id,
+            location: { lat, lng },
+            status: currentStatus,
+          };
         });
         setGpsData(liveData);
       }
     } catch (error) {
-      console.error("Error fetching GPS data:", error);
+      console.error("Webfleet fetch error:", error);
     }
   };
 
@@ -106,28 +124,53 @@ function App() {
   });
 
   return (
-    <div style={{ padding: "1rem" }}>
-      <h1>Fleet Health Dashboard</h1>
-      <input type="file" accept=".csv" onChange={handleFileUpload} />
-      <MapContainer center={[YardLocation.lat, YardLocation.lng]} zoom={14} style={{ height: "400px", marginTop: "1rem" }}>
-        <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
-        {mergedTrailers.map((trailer) => (
-          <Marker key={trailer.id} position={[trailer.location.lat, trailer.location.lng]}>
-            <Popup>
-              {trailer.id}: {trailer.status}
-            </Popup>
-          </Marker>
-        ))}
-      </MapContainer>
-      <div style={{ marginTop: "1rem" }}>
-        {mergedTrailers.map((trailer) => (
-          <div key={trailer.id}>
-            <strong>{trailer.id}</strong>: {trailer.status} (Last Service: {trailer.lastService})
-          </div>
-        ))}
+    <div className="min-h-screen bg-gray-100 p-4">
+      <h1 className="text-3xl font-bold mb-4">Fleet Health Dashboard</h1>
+      <input
+        key={Date.now()}
+        type="file"
+        accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
+        onChange={handleFileUpload}
+        className="mb-4"
+      />
+      <div className="mb-6">
+        <MapContainer
+          center={[YardLocation.lat, YardLocation.lng]}
+          zoom={14}
+          style={{ height: "400px", width: "100%" }}
+        >
+          <TileLayer
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            attribution="&copy; OpenStreetMap contributors"
+          />
+          {mergedTrailers.map((trailer) => (
+            <Marker
+              key={trailer.id}
+              position={[trailer.location.lat, trailer.location.lng]}
+            >
+              <Popup>
+                {trailer.id}: {trailer.status}
+              </Popup>
+            </Marker>
+          ))}
+        </MapContainer>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {mergedTrailers.length === 0 ? (
+          <p className="text-gray-600">No trailer data uploaded yet.</p>
+        ) : (
+          mergedTrailers.map((trailer) => (
+            <div
+              key={trailer.id}
+              className="bg-white shadow-lg rounded-lg p-4 border"
+            >
+              <p className="text-lg font-semibold">ID: {trailer.id}</p>
+              <p>Last Service: {trailer.lastService}</p>
+              <p>Status: {trailer.status}</p>
+            </div>
+          ))
+        )}
       </div>
     </div>
   );
 }
-
-export default App;
